@@ -6,8 +6,8 @@ const client = new Client({ checkUpdate: false });
 
 // ==================== KONFIGURASI ====================
 const TOKEN = 'TOKEN_AKUN_TUMBAL_MU'; // Ganti dengan token akun tumbal kamu
-const GUILD_ID = 'ID_SERVER_DISCORD'; // Ganti dengan ID Server Discord
-const VOICE_CHANNEL_ID = 'ID_VOICE_CHANNEL'; // Ganti dengan ID Voice Channel tujuan
+const GUILD_ID = '1568405345318215854'; // Ganti dengan ID Server Discord
+const VOICE_CHANNEL_ID = '1568405344584081438'; // Ganti dengan ID Voice Channel tujuan
 const PREFIX = '!';
 // =====================================================
 
