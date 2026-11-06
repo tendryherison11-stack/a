@@ -1,33 +1,76 @@
 const { Client } = require('discord.js-selfbot-v13');
-const { firefox } = require('playwright'); // 🔄 DIUBAH: Menggunakan browser Firefox internal
+const { firefox } = require('playwright'); // Menggunakan mesin Firefox asli bawaan Playwright
+const path = require('path');
 
-// Inisialisasi Akun Tumbal dengan Fitur Anti-Ban (Spoofing)
-const client = new Client({
-    checkUpdate: false,
-    patchVoice: true, // Wajib aktif agar akun bisa mengirim data audio/video WebRTC
-    ws: {
-        properties: {
-            $os: 'Windows',
-            $browser: 'Discord Client',
-            $release_channel: 'stable',
-            $client_version: '1.0.9001',
-            $os_version: '10',
-            $client_build_number: 160000,
+const client = new Client({ checkUpdate: false });
+
+// ==================== KONFIGURASI ====================
+const TOKEN = 'TOKEN_AKUN_TUMBAL_MU'; // Masukkan token akun tumbal Discord di sini
+const GUILD_ID = 'ID_SERVER_DISCORD'; 
+const VOICE_CHANNEL_ID = 'ID_VOICE_CHANNEL'; 
+const PREFIX = '!';
+// =====================================================
+
+let browserContext, discordPage, youtubePage;
+let queue = [];
+let isPlaying = false;
+
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms + Math.random() * 1000));
+
+client.on('ready', async () => {
+    console.log(`[Discord Bot] Logged in sebagai ${client.user.tag}`);
+    
+    // JEDA 30 DETIK SEBELUM MASUK VC
+    console.log('[System] Bot Standby... Menunggu 30 detik sebelum membuka Firefox...');
+    await new Promise(resolve => setTimeout(resolve, 30000)); 
+    console.log('[System] Waktu tunggu selesai. Membuka Firefox...');
+
+    const userDataDir = path.join(__dirname, 'firefox_user_data');
+
+    // Launch Firefox dengan argumen bypass UI media share
+    browserContext = await firefox.launchPersistentContext(userDataDir, {
+        headless: false, // Wajib false agar terdeteksi render visual dan bisa memicu tombol Go Live
+        viewport: { width: 1280, height: 720 },
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
+        firefoxUserPrefs: {
+            'media.navigator.permission.disabled': true, // Otomatis izinkan permission share screen di Firefox
+            'media.navigator.streams.fake': true
         }
-    }
-});
+    });
 
-// Konfigurasi Bot
-const TOKEN = "MASUKKAN_TOKEN_AKUN_TUMBAL_DISINI"; 
-const PREFIX = "!";
+    discordPage = await browserContext.newPage();
+    
+    // Langkah 1: Buka domain dasar Discord untuk mempersiapkan penyimpanan lokal Firefox
+    console.log('[System] Membuka domain dasar Discord di Firefox...');
+    await discordPage.goto('https://discord.com', { waitUntil: 'domcontentloaded' });
+    
+    // Langkah 2: Suntikkan Token langsung ke dalam LocalStorage Firefox (Bypass Halaman Login)
+    console.log('[System] Menyuntikkan token akun tumbal ke Firefox...');
+    await discordPage.evaluate((token) => {
+        localStorage.setItem('token', `"${token}"`);
+    }, TOKEN);
 
-// Menyimpan instance browser dan status stream
-let browserInstance = null;
-let pageInstance = null;
-let currentStream = null;
+    await delay(3000); // Beri Firefox waktu 3 detik untuk mengunci data token ke storage
 
-client.on('ready', () => {
-    console.log(`🦊 Theater Browser Bot (Firefox) aktif menggunakan akun: ${client.user.tag}`);
+    // Langkah 3: Langsung menuju ke link Voice Channel tujuan (Otomatis posisi sudah Logged In)
+    console.log('[System] Mengarahkan Firefox masuk ke Voice Channel...');
+    await discordPage.goto(`https://discord.com{GUILD_ID}/${VOICE_CHANNEL_ID}`, { 
+        waitUntil: 'networkidle',
+        timeout: 60000 
+    });
+
+    console.log('\n=========================================');
+    console.log('SUKSES: Firefox berhasil masuk tanpa melewati layar putih login!');
+    console.log('Menunggu antrean 10 detik lagi sebelum sistem live aktif...');
+    console.log('=========================================\n');
+
+    await delay(10000);
+
+    // Buka tab YouTube di Firefox
+    youtubePage = await browserContext.newPage();
+    await youtubePage.goto('https://youtube.com', { waitUntil: 'domcontentloaded' });
+    
+    console.log('[System] Sistem Siap! Gunakan !play di Discord.');
 });
 
 client.on('messageCreate', async (message) => {
@@ -36,88 +79,82 @@ client.on('messageCreate', async (message) => {
     const args = message.content.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
 
-    // ================================================
-    // 1. PERINTAH !PLAY (Membuka YouTube di Firefox & Go Live)
-    // ================================================
     if (command === 'play') {
-        const youtubeUrl = args;
-        if (!youtubeUrl) return message.reply("⚠️ Masukkan link YouTube! Contoh: `!play https://youtube.com`");
+        const query = args.join(' ');
+        if (!query) return message.reply('Masukkan URL YouTube atau judul video!');
 
-        const voiceChannel = message.member?.voice.channel;
-        if (!voiceChannel) return message.reply("⚠️ Anda harus berada di Voice Channel terlebih dahulu!");
+        let targetUrl = query;
+        if (!query.startsWith('http')) {
+            targetUrl = `https://://youtube.com?search_query=${encodeURIComponent(query)}`;
+        }
 
-        message.reply("🎬 Menyiapkan Firefox internal, membuka YouTube, dan memulai Go Live...");
+        queue.push(targetUrl);
+        message.reply(`Menambahkan ke antrean Firefox. Posisi: ${queue.length}`);
 
-        try {
-            // Jika ada browser lama yang masih menyala, tutup dulu
-            if (browserInstance) await browserInstance.close();
-
-            // Meluncurkan browser Firefox bawaan otomatis
-            browserInstance = await firefox.launch({
-                headless: false, // Wajib false agar browser memproses visual & suara video
-                args: [
-                    '--autoplay-policy=no-user-gesture-required' // Memaksa YouTube langsung putar suara otomatis di Firefox
-                ]
-            });
-
-            // Membuka tab baru dan pergi ke link YouTube
-            pageInstance = await browserInstance.newPage();
-            await pageInstance.goto(youtubeUrl, { waitUntil: 'load' });
-
-            // Akun tumbal masuk ke Voice Channel
-            const connection = await voiceChannel.join();
-
-            // MEMULAI GO LIVE: Menangkap layar dari aplikasi browser internal Firefox
-            currentStream = await connection.createStreamScreen({
-                source: 'firefox', // 🔄 DIUBAH: Mengkunci target share screen ke jendela Firefox
-                fps: 30,
-                bitrate: 2500 * 1000,
-                type: "video",
-                audio: true // Wajib true agar suara dari tab Firefox ikut masuk ke Discord
-            });
-
-            message.channel.send(`📺 **Theater Go Live Dimulai!** \nMenonton bersama melalui Firefox.`);
-
-        } catch (error) {
-            console.error("Gagal membuka theater lewat Firefox:", error);
-            message.reply("⚠️ Terjadi kesalahan saat mencoba membuka browser Firefox internal.");
+        if (!isPlaying) {
+            playNext(message);
         }
     }
 
-    // ================================================
-    // 2. PERINTAH !PAUSE & !RESUME (Kontrol Tombol Spasi YouTube)
-    // ================================================
-    if (command === 'pause' || command === 'resume') {
-        if (!pageInstance) return message.reply("❌ Tidak ada theater browser yang sedang berjalan.");
-        
+    if (command === 'pause') {
+        if (!isPlaying) return message.reply('Tidak ada video yang sedang diputar.');
         try {
-            // Mengirim perintah tekan tombol 'Spacebar' (Spasi) langsung ke halaman web YouTube di Firefox
-            await pageInstance.keyboard.press('Space');
-            message.reply(command === 'pause' ? "⏸️ Theater di-pause." : "▶️ Theater dilanjutkan.");
-        } catch (err) {
-            message.reply("⚠️ Gagal mengontrol pemutar video.");
+            await youtubePage.bringToFront();
+            await youtubePage.keyboard.press('k'); 
+            message.reply('Video di-pause / di-resume pada Firefox.');
+        } catch (e) {
+            message.reply('Gagal mengontrol video.');
         }
     }
 
-    // ================================================
-    // 3. PERINTAH !STOP
-    // ================================================
-    if (command === 'stop') {
-        if (!browserInstance) return message.reply("❌ Tidak ada theater yang sedang berjalan.");
-
-        try {
-            await browserInstance.close(); // Otomatis menutup tab browser Firefox
-            browserInstance = null;
-            pageInstance = null;
-
-            const currentVoice = message.guild.me.voice.channel;
-            if (currentVoice) currentVoice.leave(); // Bot keluar dari Voice Channel
-
-            message.reply("🛑 Theater dihentikan dan Firefox telah ditutup.");
-        } catch (err) {
-            message.reply("⚠️ Gagal menghentikan theater.");
-        }
+    if (command === 'skip') {
+        if (!isPlaying) return message.reply('Antrean kosong.');
+        message.reply('Skipping ke video berikutnya...');
+        playNext(message);
     }
 });
+
+async function playNext(message) {
+    if (queue.length === 0) {
+        isPlaying = false;
+        return message.channel.send('Antrean video telah habis.');
+    }
+
+    isPlaying = true;
+    let currentVideo = queue.shift();
+
+    try {
+        await youtubePage.bringToFront();
+        console.log(`[YouTube] Membuka: ${currentVideo}`);
+        await youtubePage.goto(currentVideo, { waitUntil: 'domcontentloaded' });
+
+        if (currentVideo.includes('://youtube.com')) {
+            await youtubePage.waitForSelector('#video-title');
+            await delay(2000); 
+            await youtubePage.click('#video-title');
+        }
+
+        try {
+            await youtubePage.click('button[aria-label="Accept the use of cookies and other data"]', { timeout: 2000 });
+        } catch(e) {}
+
+        // Pindah ke tab Discord di Firefox untuk klik Go Live fisik
+        await discordPage.bringToFront();
+        await delay(2000);
+
+        const shareScreenBtn = await discordPage.$('[aria-label="Share Your Screen"], [data-list-item-id*="voice-channels"] button');
+        if (shareScreenBtn) {
+            await shareScreenBtn.click();
+            console.log('[Discord] Go Live berhasil dipicu lewat klik fisik Firefox.');
+        } else {
+            console.log('[Discord] Tombol tidak ketemu. Pastikan akun sudah standby di dalam voice channel browser.');
+        }
+
+    } catch (error) {
+        console.error(error);
+        message.channel.send('Terjadi kendala saat memproses video di Firefox.');
+        playNext(message);
+    }
+}
 
 client.login(TOKEN);
