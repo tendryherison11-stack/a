@@ -1,11 +1,11 @@
 const { Client } = require('discord.js-selfbot-v13');
-const { firefox } = require('playwright'); // Menggunakan mesin Firefox asli bawaan Playwright
+const { firefox } = require('playwright'); 
 const path = require('path');
 
 const client = new Client({ checkUpdate: false });
 
 // ==================== KONFIGURASI ====================
-const TOKEN = 'TOKEN_AKUN_TUMBAL_MU'; // Masukkan token akun tumbal Discord di sini
+const TOKEN = 'TOKEN_AKUN_TUMBAL_MU'; 
 const GUILD_ID = 'ID_SERVER_DISCORD'; 
 const VOICE_CHANNEL_ID = 'ID_VOICE_CHANNEL'; 
 const PREFIX = '!';
@@ -27,32 +27,34 @@ client.on('ready', async () => {
 
     const userDataDir = path.join(__dirname, 'firefox_user_data');
 
-    // Launch Firefox dengan argumen bypass UI media share
+    // Launch Firefox dengan preferensi AUDIO dan BYPASS POP-UP tambahan
     browserContext = await firefox.launchPersistentContext(userDataDir, {
-        headless: false, // Wajib false agar terdeteksi render visual dan bisa memicu tombol Go Live
+        headless: false, 
         viewport: { width: 1280, height: 720 },
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
         firefoxUserPrefs: {
-            'media.navigator.permission.disabled': true, // Otomatis izinkan permission share screen di Firefox
-            'media.navigator.streams.fake': true
+            'media.navigator.permission.disabled': true, 
+            'media.navigator.streams.fake': false, // Diubah ke false agar browser menangkap stream audio asli dari tab
+            'media.autoplay.default': 0,          // 0 = Allow Autoplay (PENTING: Agar suara YouTube langsung menyala)
+            'media.autoplay.blocking_policy': 0,  // Memastikan audio tidak di-block oleh Firefox
+            'media.volume_scale': '1.0'           // Memastikan volume browser maksimal
         }
     });
 
     discordPage = await browserContext.newPage();
     
-    // Langkah 1: Buka domain dasar Discord untuk mempersiapkan penyimpanan lokal Firefox
+    // Buka domain dasar Discord untuk menyuntikkan token (Bypass layar putih)
     console.log('[System] Membuka domain dasar Discord di Firefox...');
     await discordPage.goto('https://discord.com', { waitUntil: 'domcontentloaded' });
     
-    // Langkah 2: Suntikkan Token langsung ke dalam LocalStorage Firefox (Bypass Halaman Login)
     console.log('[System] Menyuntikkan token akun tumbal ke Firefox...');
     await discordPage.evaluate((token) => {
         localStorage.setItem('token', `"${token}"`);
     }, TOKEN);
 
-    await delay(3000); // Beri Firefox waktu 3 detik untuk mengunci data token ke storage
+    await delay(3000); 
 
-    // Langkah 3: Langsung menuju ke link Voice Channel tujuan (Otomatis posisi sudah Logged In)
+    // Langsung menuju ke link Voice Channel tujuan
     console.log('[System] Mengarahkan Firefox masuk ke Voice Channel...');
     await discordPage.goto(`https://discord.com{GUILD_ID}/${VOICE_CHANNEL_ID}`, { 
         waitUntil: 'networkidle',
@@ -60,7 +62,7 @@ client.on('ready', async () => {
     });
 
     console.log('\n=========================================');
-    console.log('SUKSES: Firefox berhasil masuk tanpa melewati layar putih login!');
+    console.log('SUKSES: Firefox berhasil masuk!');
     console.log('Menunggu antrean 10 detik lagi sebelum sistem live aktif...');
     console.log('=========================================\n');
 
@@ -138,6 +140,11 @@ async function playNext(message) {
             await youtubePage.click('button[aria-label="Accept the use of cookies and other data"]', { timeout: 2000 });
         } catch(e) {}
 
+        // Trik Tambahan: Pastikan video tidak termute dan berinteraksi agar audio aktif
+        await delay(1000);
+        await youtubePage.keyboard.press('m'); // Unmute jika ter-mute otomatis
+        await youtubePage.keyboard.press('1'); // Lompat ke detik pertama untuk memicu interaksi audio
+
         // Pindah ke tab Discord di Firefox untuk klik Go Live fisik
         await discordPage.bringToFront();
         await delay(2000);
@@ -145,7 +152,11 @@ async function playNext(message) {
         const shareScreenBtn = await discordPage.$('[aria-label="Share Your Screen"], [data-list-item-id*="voice-channels"] button');
         if (shareScreenBtn) {
             await shareScreenBtn.click();
-            console.log('[Discord] Go Live berhasil dipicu lewat klik fisik Firefox.');
+            console.log('[Discord] Tombol Go Live diklik.');
+            
+            // Jeda sejenak untuk membiarkan menu Discord internal mendeteksi audio tab
+            await delay(1500); 
+            console.log('[Discord] Go Live berhasil dipicu dengan Audio Sharing aktif lewat Firefox.');
         } else {
             console.log('[Discord] Tombol tidak ketemu. Pastikan akun sudah standby di dalam voice channel browser.');
         }
