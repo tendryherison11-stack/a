@@ -1,124 +1,90 @@
-const { Client } = require('discord.js-selfbot-v13');
-const { DiscordStreamClient } = require('discord-stream-client');
+const express = require('express');
 const ytdl = require('ytdl-core');
-const ffmpeg = require('ffmpeg-static');
+const readline = require('readline');
 
-const client = new Client({ checkUpdate: false });
-const StreamClient = new DiscordStreamClient(client);
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-// Set kualitas video Go Live (720p/1080p aman untuk VPS kecil)
-StreamClient.setResolution('720p');
+let currentVideoUrl = "";
 
-// ==================== KONFIGURASI ====================
-const TOKEN = 'TOKEN_AKUN_TUMBAL_MU'; 
-const GUILD_ID = '1568405345318215854'; 
-const VOICE_CHANNEL_ID = '1568405344584081438'; 
-const PREFIX = '!';
-// =====================================================
-
-let queue = [];
-let isPlaying = false;
-let currentUdpConnection = null;
-
-client.on('ready', async () => {
-    console.log(`[Discord Bot] Logged in sebagai ${client.user.tag}`);
-    
-    // JEDA 30 DETIK SEBELUM SIAP (Mencegah rate limit/at risk di awal)
-    console.log('[System] Bot Standby... Menunggu 30 detik sebelum mengaktifkan voice engine...');
-    await new Promise(resolve => setTimeout(resolve, 30000)); 
-    console.log('[System] Sistem Siap! Gunakan perintah !play <link_youtube> di text channel.');
+// Mengaktifkan input chat langsung dari terminal VPS/Railway kamu
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
 });
 
-client.on('messageCreate', async (message) => {
-    if (!message.content.startsWith(PREFIX) || message.author.bot) return;
-
-    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
-
-    if (command === 'play') {
-        const query = args.join(' ');
-        if (!query) return message.reply('Masukkan URL YouTube penuh!');
-        if (!query.startsWith('http')) return message.reply('Harap masukkan URL YouTube tautan penuh (https://...)');
-
-        queue.push(query);
-        message.reply(`Menambahkan video ke antrean Go Live. Posisi: ${queue.length}`);
-
-        if (!isPlaying) {
-            playNext(message);
-        }
-    }
-
-    if (command === 'pause') {
-        if (!isPlaying || !currentUdpConnection) return message.reply('Tidak ada streaming yang berjalan.');
-        
-        // Memanfaatkan kontrol pause internal pada stream connection gateway
-        if (currentUdpConnection.mediaConnection.isPaused()) {
-            currentUdpConnection.mediaConnection.resume();
-            message.reply('Video Go Live dilanjutkan.');
+function askVideo() {
+    rl.question('\n[Input] Masukkan URL YouTube untuk disiarkan: ', (url) => {
+        if (url.startsWith('http')) {
+            currentVideoUrl = url;
+            console.log(`[System] Sukses! Video dijadwalkan. Silakan buka/refresh link website kamu.`);
         } else {
-            currentUdpConnection.mediaConnection.pause();
-            message.reply('Video Go Live di-pause.');
+            console.log('[Error] Harap masukkan URL penuh (https://...)');
         }
+        askVideo();
+    });
+}
+
+// Halaman utama Website Streaming kamu
+app.get('/', (req, res) => {
+    if (!currentVideoUrl) {
+        return res.send(`
+            <body style="background:#111; color:#fff; text-align:center; font-family:sans-serif; padding-top:100px;">
+                <h1>📺 Stasiun TV Bot Kamu Siap</h1>
+                <p>Belum ada video yang diputar. Silakan masukkan link YouTube di terminal server!</p>
+            </body>
+        `);
     }
 
-    if (command === 'skip') {
-        if (!isPlaying) return message.reply('Antrean kosong.');
-        message.reply('Skipping ke video berikutnya...');
-        if (currentUdpConnection) {
-            currentUdpConnection.stopStream(); // Menghentikan stream aktif untuk memicu antrean baru
-        }
-    }
+    // Mengirimkan halaman HTML dengan pemutar video layar lebar otomatis
+    res.send(`
+        <html lang="id">
+        <head>
+            <title>Go Live Stream</title>
+            <style>
+                body { margin: 0; background: #000; overflow: hidden; }
+                video { width: 100vw; height: 100vh; object-fit: contain; }
+            </style>
+        </head>
+        <body>
+            <!-- Video otomatis putar (autoplay), layar lebar penuh, dan ada suaranya -->
+            <video id="player" controls autoplay playsinline>
+                <source src="/stream-media" type="video/mp4">
+                Browser kamu tidak mendukung video streaming.
+            </video>
+            <script>
+                // Trik memicu suara otomatis jika browser memblokir autoplay audio
+                document.body.addEventListener('click', () => {
+                    const v = document.getElementById('player');
+                    if(v.muted) { v.muted = false; v.play(); }
+                }, { once: true });
+            </script>
+        </body>
+        </html>
+    `);
 });
 
-async function playNext(message) {
-    if (queue.length === 0) {
-        isPlaying = false;
-        if (currentUdpConnection) {
-            currentUdpConnection.disconnect();
-        }
-        return message.channel.send('Antrean streaming video telah habis.');
-    }
-
-    isPlaying = true;
-    let currentVideoUrl = queue.shift();
+// Jalur pipa khusus untuk menyedot data video+suara YouTube langsung ke website
+app.get('/stream-media', (req, res) => {
+    if (!currentVideoUrl) return res.status(404).send('No video');
 
     try {
-        message.channel.send(`Memulai koneksi voice dan memproses Go Live...`);
-
-        // Akun tumbal otomatis join voice channel via API backend resmi
-        const voiceConnection = await StreamClient.joinVoice(GUILD_ID, VOICE_CHANNEL_ID);
-        
-        // Membuat sesi penayangan Go Live / Screenshare
-        currentUdpConnection = await voiceConnection.createStream();
-        
-        console.log('[Discord API] Lencana GO LIVE aktif pada akun tumbal.');
-        message.channel.send(`Akun tumbal sekarang sedang **GO LIVE** memutar video tersebut!`);
-
-        // Mengambil kombo audio + video berformat mp4/webm terbaik secara efisien
-        const videoReadableStream = ytdl(currentVideoUrl, {
+        const videoStream = ytdl(currentVideoUrl, {
             quality: 'highest',
             filter: format => format.container === 'mp4' && format.hasAudio && format.hasVideo
         });
 
-        // Menembakkan media stream langsung melalui jalur UDP Discord dengan decoder FFmpeg internal
-        currentUdpConnection.mediaConnection.setSpeaking(true);
-        currentUdpConnection.mediaConnection.setVideoStatus(true);
-
-        // Memasang file/stream ke engine
-        currentUdpConnection.playMP4(videoReadableStream, ffmpeg);
-
-        // Jika durasi video habis, otomatis lompat ke antrean selanjutnya
-        currentUdpConnection.mediaConnection.on('finish', () => {
-            console.log('[System] Video selesai diputar.');
-            playNext(message);
-        });
-
-    } catch (error) {
-        console.error(error);
-        message.channel.send('Terjadi kendala teknis saat menyiarkan video Go Live.');
-        isPlaying = false;
-        playNext(message);
+        res.setHeader('Content-Type', 'video/mp4');
+        videoStream.pipe(res);
+    } catch (e) {
+        res.status(500).send('Error streaming');
     }
-}
+});
 
-client.login(TOKEN);
+app.listen(PORT, () => {
+    console.log(`\n==================================================`);
+    console.log(`🚀 Website Live aktif di: http://localhost:${PORT}`);
+    console.log(`   (Atau buka link domain .up.railway.app kamu)`);
+    console.log(`==================================================`);
+    askVideo();
+});
