@@ -11,8 +11,8 @@ StreamClient.setResolution('720p');
 
 // ==================== KONFIGURASI ====================
 const TOKEN = 'TOKEN_AKUN_TUMBAL_MU'; 
-const GUILD_ID = 'ID_SERVER_DISCORD'; 
-const VOICE_CHANNEL_ID = 'ID_VOICE_CHANNEL'; 
+const GUILD_ID = '1568405345318215854'; 
+const VOICE_CHANNEL_ID = '1568405344584081438'; 
 const PREFIX = '!';
 // =====================================================
 
