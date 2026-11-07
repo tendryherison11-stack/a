@@ -43,30 +43,33 @@ client.on('ready', async () => {
 
     discordPage = await browserContext.newPage();
     
-    // Buka halaman login Discord untuk memicu environment browser
+    // Buka halaman login Discord dengan toleransi waktu muat tanpa batas (Anti-Timeout)
     console.log('[System] Membuka domain Discord di Firefox...');
-    await discordPage.goto('https://discord.com', { waitUntil: 'networkidle' });
+    await discordPage.goto('https://discord.com', { 
+        waitUntil: 'commit', // Langsung eksekusi begitu server merespons, tidak perlu nunggu loading selesai
+        timeout: 0          // Mematikan fitur timeout agar tidak crash walau internet lambat
+    });
     
-    // PERBAIKAN FIX: Menggunakan window.localStorage agar terdefinisi di Firefox
+    // Menggunakan window.localStorage agar terdefinisi di Firefox
     console.log('[System] Menyuntikkan token akun tumbal ke Firefox...');
     await discordPage.evaluate((token) => {
         window.localStorage.setItem('token', `"${token}"`);
     }, TOKEN);
 
-    // Muat ulang halaman agar sesi token terbaca oleh Discord Web
+    // Jeda sejenak agar token tersimpan sempurna
     await delay(3000); 
     console.log('[System] Menyegarkan halaman untuk mengaktifkan sesi login...');
-    await discordPage.reload({ waitUntil: 'networkidle' });
+    await discordPage.reload({ waitUntil: 'commit', timeout: 0 });
 
-    // Langsung arahkan browser masuk ke Voice Channel tujuan
+    // Langsung arahkan browser masuk ke Voice Channel tujuan tanpa batas waktu
     console.log('[System] Mengarahkan Firefox masuk ke Voice Channel...');
     await discordPage.goto(`https://discord.com{GUILD_ID}/${VOICE_CHANNEL_ID}`, { 
-        waitUntil: 'networkidle',
-        timeout: 60000 
+        waitUntil: 'domcontentloaded', // Lebih cepat memproses struktur halaman
+        timeout: 0                     // Mematikan timeout agar tidak macet di tengah jalan
     });
 
     console.log('\n=========================================');
-    console.log('SUKSES: Firefox berhasil masuk tanpa layar putih!');
+    console.log('SUKSES: Firefox berhasil masuk tanpa terhambat loading!');
     console.log('Menunggu antrean 10 detik lagi sebelum sistem live aktif...');
     console.log('=========================================\n');
 
@@ -74,7 +77,7 @@ client.on('ready', async () => {
 
     // Buka tab YouTube di Firefox
     youtubePage = await browserContext.newPage();
-    await youtubePage.goto('https://youtube.com', { waitUntil: 'domcontentloaded' });
+    await youtubePage.goto('https://youtube.com', { waitUntil: 'domcontentloaded', timeout: 0 });
     
     console.log('[System] Sistem Siap! Gunakan !play di Discord.');
 });
@@ -132,7 +135,7 @@ async function playNext(message) {
     try {
         await youtubePage.bringToFront();
         console.log(`[YouTube] Membuka: ${currentVideo}`);
-        await youtubePage.goto(currentVideo, { waitUntil: 'domcontentloaded' });
+        await youtubePage.goto(currentVideo, { waitUntil: 'domcontentloaded', timeout: 0 });
 
         if (currentVideo.includes('://youtube.com')) {
             await youtubePage.waitForSelector('#video-title');
@@ -144,7 +147,7 @@ async function playNext(message) {
             await youtubePage.click('button[aria-label="Accept the use of cookies and other data"]', { timeout: 2000 });
         } catch(e) {}
 
-        // Trik Tambahan: Mengaktifkan interaksi audio YouTube agar tidak ter-mute otomatis
+        // Mengaktifkan interaksi audio YouTube agar tidak ter-mute otomatis
         await delay(1000);
         await youtubePage.keyboard.press('m'); // Unmute suara jika teredam otomatis
         await youtubePage.keyboard.press('1'); // Pemicu klik player agar suara aktif
