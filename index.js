@@ -5,7 +5,7 @@ const path = require('path');
 const client = new Client({ checkUpdate: false });
 
 // ==================== KONFIGURASI ====================
-const TOKEN = 'TOKEN_AKUN_TUMBAL_MU'; // Ganti dengan token akun tumbal kamu
+const TOKEN = 'MTU2ODI4ODI4NTIxNjg3NDY4NA.GSaa8_.svZ2yvAdZSiZAm-RM_0M3dq398r7a1-5J7sAbk'; // Ganti dengan token akun tumbal kamu
 const GUILD_ID = '1568405345318215854'; // Ganti dengan ID Server Discord
 const VOICE_CHANNEL_ID = '1568405344584081438'; // Ganti dengan ID Voice Channel tujuan
 const PREFIX = '!';
@@ -46,8 +46,8 @@ client.on('ready', async () => {
     // Buka halaman login Discord dengan toleransi waktu muat tanpa batas (Anti-Timeout)
     console.log('[System] Membuka domain Discord di Firefox...');
     await discordPage.goto('https://discord.com', { 
-        waitUntil: 'commit', // Langsung eksekusi begitu server merespons, tidak perlu nunggu loading selesai
-        timeout: 0          // Mematikan fitur timeout agar tidak crash walau internet lambat
+        waitUntil: 'commit', 
+        timeout: 0          
     });
     
     // Menggunakan window.localStorage agar terdefinisi di Firefox
@@ -57,19 +57,17 @@ client.on('ready', async () => {
     }, TOKEN);
 
     // Jeda sejenak agar token tersimpan sempurna
-    await delay(3000); 
-    console.log('[System] Menyegarkan halaman untuk mengaktifkan sesi login...');
-    await discordPage.reload({ waitUntil: 'commit', timeout: 0 });
-
-    // Langsung arahkan browser masuk ke Voice Channel tujuan tanpa batas waktu
+    await delay(2000); 
+    
+    // PERBAIKAN: Langsung melompat ke Voice Channel tanpa melalui proses .reload() yang memicu crash
     console.log('[System] Mengarahkan Firefox masuk ke Voice Channel...');
     await discordPage.goto(`https://discord.com{GUILD_ID}/${VOICE_CHANNEL_ID}`, { 
-        waitUntil: 'domcontentloaded', // Lebih cepat memproses struktur halaman
-        timeout: 0                     // Mematikan timeout agar tidak macet di tengah jalan
+        waitUntil: 'domcontentloaded', 
+        timeout: 0                     
     });
 
     console.log('\n=========================================');
-    console.log('SUKSES: Firefox berhasil masuk tanpa terhambat loading!');
+    console.log('SUKSES: Firefox berhasil masuk tanpa terhambat crash reload!');
     console.log('Menunggu antrean 10 detik lagi sebelum sistem live aktif...');
     console.log('=========================================\n');
 
@@ -149,8 +147,8 @@ async function playNext(message) {
 
         // Mengaktifkan interaksi audio YouTube agar tidak ter-mute otomatis
         await delay(1000);
-        await youtubePage.keyboard.press('m'); // Unmute suara jika teredam otomatis
-        await youtubePage.keyboard.press('1'); // Pemicu klik player agar suara aktif
+        await youtubePage.keyboard.press('m'); 
+        await youtubePage.keyboard.press('1'); 
 
         // Pindah ke tab Discord di Firefox untuk klik Go Live fisik
         await discordPage.bringToFront();
