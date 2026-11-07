@@ -5,7 +5,7 @@ const path = require('path');
 const client = new Client({ checkUpdate: false });
 
 // ==================== KONFIGURASI ====================
-const TOKEN = 'MTU2ODI4ODI4NTIxNjg3NDY4NA.GSaa8_.svZ2yvAdZSiZAm-RM_0M3dq398r7a1-5J7sAbk'; // Ganti dengan token akun tumbal kamu
+const TOKEN = ''; // Ganti dengan token akun tumbal kamu
 const GUILD_ID = '1568405345318215854'; // Ganti dengan ID Server Discord
 const VOICE_CHANNEL_ID = '1568405344584081438'; // Ganti dengan ID Voice Channel tujuan
 const PREFIX = '!';
