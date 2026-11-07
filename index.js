@@ -1,83 +1,32 @@
 const { Client } = require('discord.js-selfbot-v13');
-const { firefox } = require('playwright'); 
-const path = require('path');
+const { DiscordStreamClient } = require('discord-stream-client');
+const ytdl = require('ytdl-core');
+const ffmpeg = require('ffmpeg-static');
 
 const client = new Client({ checkUpdate: false });
+const StreamClient = new DiscordStreamClient(client);
+
+// Set kualitas video Go Live (720p/1080p aman untuk VPS kecil)
+StreamClient.setResolution('720p');
 
 // ==================== KONFIGURASI ====================
-const TOKEN = ''; // Ganti dengan token akun tumbal kamu
-const GUILD_ID = '1568405345318215854'; // Ganti dengan ID Server Discord
-const VOICE_CHANNEL_ID = '1568405344584081438'; // Ganti dengan ID Voice Channel tujuan
+const TOKEN = 'TOKEN_AKUN_TUMBAL_MU'; 
+const GUILD_ID = 'ID_SERVER_DISCORD'; 
+const VOICE_CHANNEL_ID = 'ID_VOICE_CHANNEL'; 
 const PREFIX = '!';
 // =====================================================
 
-let browserContext, discordPage, youtubePage;
 let queue = [];
 let isPlaying = false;
-
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms + Math.random() * 1000));
+let currentUdpConnection = null;
 
 client.on('ready', async () => {
     console.log(`[Discord Bot] Logged in sebagai ${client.user.tag}`);
     
-    // JEDA 30 DETIK SEBELUM MASUK VC (Agar terlihat humanis & aman)
-    console.log('[System] Bot Standby... Menunggu 30 detik sebelum membuka Firefox...');
+    // JEDA 30 DETIK SEBELUM SIAP (Mencegah rate limit/at risk di awal)
+    console.log('[System] Bot Standby... Menunggu 30 detik sebelum mengaktifkan voice engine...');
     await new Promise(resolve => setTimeout(resolve, 30000)); 
-    console.log('[System] Waktu tunggu selesai. Membuka Firefox...');
-
-    const userDataDir = path.join(__dirname, 'firefox_user_data');
-
-    // Launch Firefox dengan preferensi AUDIO dan BYPASS POP-UP otomatis
-    browserContext = await firefox.launchPersistentContext(userDataDir, {
-        headless: false, 
-        viewport: { width: 1280, height: 720 },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
-        firefoxUserPrefs: {
-            'media.navigator.permission.disabled': true, // Matikan pop-up konfirmasi share screen
-            'media.navigator.streams.fake': false,        // Ambil stream suara asli dari tab
-            'media.autoplay.default': 0,                  // Izinkan autoplay suara YouTube
-            'media.autoplay.blocking_policy': 0,  
-            'media.volume_scale': '1.0'           
-        }
-    });
-
-    discordPage = await browserContext.newPage();
-    
-    // Buka halaman login Discord dengan toleransi waktu muat tanpa batas (Anti-Timeout)
-    console.log('[System] Membuka domain Discord di Firefox...');
-    await discordPage.goto('https://discord.com', { 
-        waitUntil: 'commit', 
-        timeout: 0          
-    });
-    
-    // Menggunakan window.localStorage agar terdefinisi di Firefox
-    console.log('[System] Menyuntikkan token akun tumbal ke Firefox...');
-    await discordPage.evaluate((token) => {
-        window.localStorage.setItem('token', `"${token}"`);
-    }, TOKEN);
-
-    // Jeda sejenak agar token tersimpan sempurna
-    await delay(2000); 
-    
-    // PERBAIKAN: Langsung melompat ke Voice Channel tanpa melalui proses .reload() yang memicu crash
-    console.log('[System] Mengarahkan Firefox masuk ke Voice Channel...');
-    await discordPage.goto(`https://discord.com{GUILD_ID}/${VOICE_CHANNEL_ID}`, { 
-        waitUntil: 'domcontentloaded', 
-        timeout: 0                     
-    });
-
-    console.log('\n=========================================');
-    console.log('SUKSES: Firefox berhasil masuk tanpa terhambat crash reload!');
-    console.log('Menunggu antrean 10 detik lagi sebelum sistem live aktif...');
-    console.log('=========================================\n');
-
-    await delay(10000);
-
-    // Buka tab YouTube di Firefox
-    youtubePage = await browserContext.newPage();
-    await youtubePage.goto('https://youtube.com', { waitUntil: 'domcontentloaded', timeout: 0 });
-    
-    console.log('[System] Sistem Siap! Gunakan !play di Discord.');
+    console.log('[System] Sistem Siap! Gunakan perintah !play <link_youtube> di text channel.');
 });
 
 client.on('messageCreate', async (message) => {
@@ -88,15 +37,11 @@ client.on('messageCreate', async (message) => {
 
     if (command === 'play') {
         const query = args.join(' ');
-        if (!query) return message.reply('Masukkan URL YouTube atau judul video!');
+        if (!query) return message.reply('Masukkan URL YouTube penuh!');
+        if (!query.startsWith('http')) return message.reply('Harap masukkan URL YouTube tautan penuh (https://...)');
 
-        let targetUrl = query;
-        if (!query.startsWith('http')) {
-            targetUrl = `https://://youtube.com?search_query=${encodeURIComponent(query)}`;
-        }
-
-        queue.push(targetUrl);
-        message.reply(`Menambahkan ke antrean Firefox. Posisi: ${queue.length}`);
+        queue.push(query);
+        message.reply(`Menambahkan video ke antrean Go Live. Posisi: ${queue.length}`);
 
         if (!isPlaying) {
             playNext(message);
@@ -104,69 +49,74 @@ client.on('messageCreate', async (message) => {
     }
 
     if (command === 'pause') {
-        if (!isPlaying) return message.reply('Tidak ada video yang sedang diputar.');
-        try {
-            await youtubePage.bringToFront();
-            await youtubePage.keyboard.press('k'); 
-            message.reply('Video di-pause / di-resume pada Firefox.');
-        } catch (e) {
-            message.reply('Gagal mengontrol video.');
+        if (!isPlaying || !currentUdpConnection) return message.reply('Tidak ada streaming yang berjalan.');
+        
+        // Memanfaatkan kontrol pause internal pada stream connection gateway
+        if (currentUdpConnection.mediaConnection.isPaused()) {
+            currentUdpConnection.mediaConnection.resume();
+            message.reply('Video Go Live dilanjutkan.');
+        } else {
+            currentUdpConnection.mediaConnection.pause();
+            message.reply('Video Go Live di-pause.');
         }
     }
 
     if (command === 'skip') {
         if (!isPlaying) return message.reply('Antrean kosong.');
         message.reply('Skipping ke video berikutnya...');
-        playNext(message);
+        if (currentUdpConnection) {
+            currentUdpConnection.stopStream(); // Menghentikan stream aktif untuk memicu antrean baru
+        }
     }
 });
 
 async function playNext(message) {
     if (queue.length === 0) {
         isPlaying = false;
-        return message.channel.send('Antrean video telah habis.');
+        if (currentUdpConnection) {
+            currentUdpConnection.disconnect();
+        }
+        return message.channel.send('Antrean streaming video telah habis.');
     }
 
     isPlaying = true;
-    let currentVideo = queue.shift();
+    let currentVideoUrl = queue.shift();
 
     try {
-        await youtubePage.bringToFront();
-        console.log(`[YouTube] Membuka: ${currentVideo}`);
-        await youtubePage.goto(currentVideo, { waitUntil: 'domcontentloaded', timeout: 0 });
+        message.channel.send(`Memulai koneksi voice dan memproses Go Live...`);
 
-        if (currentVideo.includes('://youtube.com')) {
-            await youtubePage.waitForSelector('#video-title');
-            await delay(2000); 
-            await youtubePage.click('#video-title');
-        }
+        // Akun tumbal otomatis join voice channel via API backend resmi
+        const voiceConnection = await StreamClient.joinVoice(GUILD_ID, VOICE_CHANNEL_ID);
+        
+        // Membuat sesi penayangan Go Live / Screenshare
+        currentUdpConnection = await voiceConnection.createStream();
+        
+        console.log('[Discord API] Lencana GO LIVE aktif pada akun tumbal.');
+        message.channel.send(`Akun tumbal sekarang sedang **GO LIVE** memutar video tersebut!`);
 
-        try {
-            await youtubePage.click('button[aria-label="Accept the use of cookies and other data"]', { timeout: 2000 });
-        } catch(e) {}
+        // Mengambil kombo audio + video berformat mp4/webm terbaik secara efisien
+        const videoReadableStream = ytdl(currentVideoUrl, {
+            quality: 'highest',
+            filter: format => format.container === 'mp4' && format.hasAudio && format.hasVideo
+        });
 
-        // Mengaktifkan interaksi audio YouTube agar tidak ter-mute otomatis
-        await delay(1000);
-        await youtubePage.keyboard.press('m'); 
-        await youtubePage.keyboard.press('1'); 
+        // Menembakkan media stream langsung melalui jalur UDP Discord dengan decoder FFmpeg internal
+        currentUdpConnection.mediaConnection.setSpeaking(true);
+        currentUdpConnection.mediaConnection.setVideoStatus(true);
 
-        // Pindah ke tab Discord di Firefox untuk klik Go Live fisik
-        await discordPage.bringToFront();
-        await delay(2000);
+        // Memasang file/stream ke engine
+        currentUdpConnection.playMP4(videoReadableStream, ffmpeg);
 
-        const shareScreenBtn = await discordPage.$('[aria-label="Share Your Screen"], [data-list-item-id*="voice-channels"] button');
-        if (shareScreenBtn) {
-            await shareScreenBtn.click();
-            console.log('[Discord] Tombol Go Live diklik.');
-            await delay(1500); 
-            console.log('[Discord] Go Live berhasil aktif dengan audio sharing di Firefox.');
-        } else {
-            console.log('[Discord] Tombol tidak ketemu. Pastikan akun standby di voice channel.');
-        }
+        // Jika durasi video habis, otomatis lompat ke antrean selanjutnya
+        currentUdpConnection.mediaConnection.on('finish', () => {
+            console.log('[System] Video selesai diputar.');
+            playNext(message);
+        });
 
     } catch (error) {
         console.error(error);
-        message.channel.send('Terjadi kendala saat memproses video di Firefox.');
+        message.channel.send('Terjadi kendala teknis saat menyiarkan video Go Live.');
+        isPlaying = false;
         playNext(message);
     }
 }
