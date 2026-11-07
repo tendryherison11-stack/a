@@ -1,37 +1,19 @@
 const express = require('express');
 const ytdl = require('ytdl-core');
-const readline = require('readline');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-let currentVideoUrl = "";
-
-// Mengaktifkan input chat langsung dari terminal VPS/Railway kamu
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
-
-function askVideo() {
-    rl.question('\n[Input] Masukkan URL YouTube untuk disiarkan: ', (url) => {
-        if (url.startsWith('http')) {
-            currentVideoUrl = url;
-            console.log(`[System] Sukses! Video dijadwalkan. Silakan buka/refresh link website kamu.`);
-        } else {
-            console.log('[Error] Harap masukkan URL penuh (https://...)');
-        }
-        askVideo();
-    });
-}
-
 // Halaman utama Website Streaming kamu
 app.get('/', (req, res) => {
+    // Otomatis membaca link YouTube dari Environment Variable VIDEO_URL di Railway
+    const currentVideoUrl = process.env.VIDEO_URL;
+
     if (!currentVideoUrl) {
         return res.send(`
             <body style="background:#111; color:#fff; text-align:center; font-family:sans-serif; padding-top:100px;">
                 <h1>📺 Stasiun TV Bot Kamu Siap</h1>
-                <p>Belum ada video yang diputar. Silakan masukkan link YouTube di terminal server!</p>
+                <p>Belum ada video yang diputar. Silakan masukkan link YouTube di menu Variables Railway dengan nama <b>VIDEO_URL</b>!</p>
             </body>
         `);
     }
@@ -66,7 +48,8 @@ app.get('/', (req, res) => {
 
 // Jalur pipa khusus untuk menyedot data video+suara YouTube langsung ke website
 app.get('/stream-media', (req, res) => {
-    if (!currentVideoUrl) return res.status(404).send('No video');
+    const currentVideoUrl = process.env.VIDEO_URL;
+    if (!currentVideoUrl) return res.status(404).send('No video URL set');
 
     try {
         const videoStream = ytdl(currentVideoUrl, {
@@ -77,14 +60,12 @@ app.get('/stream-media', (req, res) => {
         res.setHeader('Content-Type', 'video/mp4');
         videoStream.pipe(res);
     } catch (e) {
-        res.status(500).send('Error streaming');
+        res.status(500).send('Error streaming media');
     }
 });
 
 app.listen(PORT, () => {
-    console.log(`\n==================================================`);
-    console.log(`🚀 Website Live aktif di: http://localhost:${PORT}`);
-    console.log(`   (Atau buka link domain .up.railway.app kamu)`);
     console.log(`==================================================`);
-    askVideo();
+    console.log(`🚀 Website Live aktif di Port: ${PORT}`);
+    console.log(`==================================================`);
 });
